@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Managed by Ansible.
+# Usage:
+#   sudo /opt/scripts/restore.sh db <db_name> <backup_file.sql.gz>
+#   sudo /opt/scripts/restore.sh bucket <bucket_name> <backup_file.tar.gz>
+#   sudo /opt/scripts/restore.sh redis - <backup_file.rdb.gz>
+set -euo pipefail
+
+BACKUP_ROOT="{{ backup_root }}"
+KIND="${1:?kind: db|bucket}"
+NAME="${2:?name}"
+FILE="${3:?path to backup file}"
+
+if [ "$KIND" = "db" ]; then
+  echo "[restore] WARNING: this overwrites database '$NAME'. Ctrl+C within 5s to abort."
+  sleep 5
+  gunzip -c "$FILE" | docker exec -i shared_postgres psql -U {{ postgres_admin_user }} -d "$NAME"
+  echo "[restore] database '$NAME' restored from $FILE"
+
+elif [ "$KIND" = "bucket" ]; then
+  echo "[restore] WARNING: this will mirror '$FILE' back into bucket '$NAME', overwriting existing objects. Ctrl+C within 5s to abort."
+  sleep 5
+  TMP=$(mktemp -d)
+  tar -xzf "$FILE" -C "$TMP"
+  SRC_DIR=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -n1)
+  docker run --rm --network {{ docker_network }} -v "$SRC_DIR:/restore" minio/mc:latest \
+    sh -c "mc alias set local http://minio:9000 {{ minio_root_user }} {{ minio_root_password }} >/dev/null && mc mirror --quiet /restore local/$NAME"
+  rm -rf "$TMP"
+  echo "[restore] bucket '$NAME' restored from $FILE"
+elif [ "$KIND" = "redis" ]; then
+  echo "[restore] WARNING: this replaces the ENTIRE redis instance (all apps' cached keys) with $FILE. Ctrl+C within 5s to abort."
+  sleep 5
+  docker compose -f {{ shared_root }}/docker-compose.yml stop redis
+  gunzip -c "$FILE" > /tmp/dump.rdb
+  docker cp /tmp/dump.rdb shared_redis:/data/dump.rdb
+  rm -f /tmp/dump.rdb
+  docker compose -f {{ shared_root }}/docker-compose.yml start redis
+  echo "[restore] redis instance restored from $FILE"
+
+else
+  echo "unknown kind: $KIND (expected db|bucket|redis)"; exit 1
+fi

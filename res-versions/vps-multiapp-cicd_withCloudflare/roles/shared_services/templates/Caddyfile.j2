@@ -1,0 +1,38 @@
+# Managed by Ansible - do not edit by hand on the server.
+# TLS is terminated at Cloudflare's edge (the tunnel connection to this host
+# is already encrypted end-to-end), so Caddy serves plain HTTP internally and
+# does NOT attempt its own ACME/Let's Encrypt certificates.
+{
+  auto_https off
+}
+
+:8080 {
+{% for app in apps %}
+{% if app.domain %}
+  @{{ app.name | replace('-', '_') }} host {{ app.domain }}
+  handle @{{ app.name | replace('-', '_') }} {
+    reverse_proxy {{ app.name }}:{{ app.internal_port }}
+  }
+{% endif %}
+{% endfor %}
+
+  # S3 API - use path-style addressing from clients, e.g.
+  # https://{{ minio_s3_domain }}/app3-uploads/some-key
+  @minio_s3 host {{ minio_s3_domain }}
+  handle @minio_s3 {
+    reverse_proxy minio:9000
+  }
+
+  # MinIO web console - needs websocket upgrade support for the browser UI,
+  # which Caddy's reverse_proxy handles automatically.
+  @minio_console host {{ minio_console_domain }}
+  handle @minio_console {
+    reverse_proxy minio:9001 {
+      header_up X-Real-IP {remote_host}
+    }
+  }
+
+  handle {
+    respond "not found" 404
+  }
+}

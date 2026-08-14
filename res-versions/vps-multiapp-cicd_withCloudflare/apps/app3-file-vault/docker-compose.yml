@@ -1,0 +1,14 @@
+services:
+  app3-file-vault:
+    build: .
+    container_name: app3-file-vault
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - shared_net
+    # No ports published - reached only via Caddy -> Cloudflare Tunnel at
+    # https://app3.example.com (see group_vars/all/vars.yml "domain" field).
+
+networks:
+  shared_net:
+    external: true

@@ -15,7 +15,7 @@ git add .
 
 echo Committing changes...
 :: git commit -m "Automated sync commit"
-git commit -m "vps-multiapp-cicd init"
+git commit -m "Cloudflare included"
 
 :: Check if the remote is set to the correct SSH host
 git remote set-url origin git@github.com:samuelongitcode/vps-multiapp-cicd.git

@@ -1,0 +1,62 @@
+---
+- name: Add Cloudflare package signing key
+  get_url:
+    url: https://pkg.cloudflare.com/cloudflare-main.gpg
+    dest: /usr/share/keyrings/cloudflare-main.gpg
+    mode: "0644"
+
+- name: Add cloudflared apt repository
+  apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared {{ ansible_distribution_release }} main"
+    state: present
+    filename: cloudflared
+
+- name: Install cloudflared
+  apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+
+- name: Ensure /etc/cloudflared exists
+  file:
+    path: /etc/cloudflared
+    state: directory
+    mode: "0700"
+
+- name: Write tunnel credentials file (from vault - never committed in plaintext)
+  copy:
+    content: "{{ cloudflare_tunnel_credentials_json }}"
+    dest: "/etc/cloudflared/{{ cloudflare_tunnel_id }}.json"
+    mode: "0600"
+  no_log: true
+  notify: restart cloudflared
+
+- name: Render tunnel ingress config (every public hostname -> internal service)
+  template:
+    src: config.yml.j2
+    dest: /etc/cloudflared/config.yml
+    mode: "0600"
+  notify: restart cloudflared
+
+- name: Install cloudflared as a systemd service (idempotent - no-op if already installed)
+  command: cloudflared service install
+  args:
+    creates: /etc/systemd/system/cloudflared.service
+
+- name: Ensure cloudflared is enabled and running
+  systemd:
+    name: cloudflared
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Flush handlers now so a config change takes effect before we (potentially) lock the firewall down
+  meta: flush_handlers
+
+- name: Wait for the tunnel to register a connection before we continue
+  command: cloudflared tunnel info {{ cloudflare_tunnel_id }}
+  register: tunnel_info
+  until: tunnel_info.rc == 0
+  retries: 10
+  delay: 3
+  changed_when: false

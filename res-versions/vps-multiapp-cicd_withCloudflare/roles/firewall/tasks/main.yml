@@ -1,0 +1,39 @@
+---
+# Zero inbound ports open, on purpose. Nothing in this stack needs one:
+#  - cloudflared only makes OUTBOUND connections to Cloudflare's edge
+#  - Caddy binds to 127.0.0.1 only (see roles/shared_services) - loopback
+#    traffic isn't "inbound" from ufw's point of view
+#  - Postgres/MinIO/Redis are never published to the host at all
+# This means your own IP changing (dynamic ISP address) is a non-issue:
+# there's no allowlist to keep updated because there's nothing to allow in.
+# Access control happens at Cloudflare Access (identity-based), not IP-based
+# firewall rules.
+#
+# IMPORTANT: this task runs LAST in provision.yml, after roles/cloudflared has
+# already confirmed the tunnel is up. Running it before that would lock you
+# out with no way back in except your hosting provider's web console.
+
+- name: Install ufw
+  apt:
+    name: ufw
+    state: present
+
+- name: Default deny all incoming traffic
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Default allow all outgoing traffic (cloudflared, apt, docker pulls, etc need this)
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+- name: Explicitly allow loopback traffic (Caddy's 127.0.0.1:8080 needs this)
+  community.general.ufw:
+    rule: allow
+    interface: lo
+    direction: in
+
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled

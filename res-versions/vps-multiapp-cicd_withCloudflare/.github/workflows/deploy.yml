@@ -1,0 +1,71 @@
+name: Deploy to VPS
+
+# Push to main -> Ansible runs from the GitHub runner over SSH and deploys
+# only the app(s) that changed (or all, if shared infra changed).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "group_vars/**"
+      - "roles/**"
+      - "playbooks/**"
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Deploy a single app by name (leave blank for all)"
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install ansible
+
+      - name: Install required Ansible collections
+        run: ansible-galaxy collection install community.docker community.general ansible.posix
+
+      - name: Install cloudflared (needed to reach the VPS - no direct IP/port is exposed)
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Write inventory (Cloudflare Tunnel only - no direct IP, no open ports)
+        run: |
+          mkdir -p inventory
+          cat > inventory/hosts.ini << INV
+          [vps]
+          prod ansible_host=${{ secrets.VPS_SSH_HOSTNAME }} ansible_user=${{ secrets.VPS_USER }} ansible_ssh_private_key_file=~/.ssh/id_ed25519 ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new -o ProxyCommand="cloudflared access ssh --hostname %h --service-token-id ${{ secrets.CF_ACCESS_CLIENT_ID }} --service-token-secret ${{ secrets.CF_ACCESS_CLIENT_SECRET }}"'
+          INV
+
+      - name: Write vault password file
+        run: echo "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > .vault_pass.txt
+
+      - name: Determine target app
+        id: target
+        run: |
+          APP="${{ github.event.inputs.app }}"
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+
+      - name: Run deploy playbook
+        run: |
+          if [ -n "${{ steps.target.outputs.app }}" ]; then
+            ansible-playbook playbooks/deploy.yml -e "app=${{ steps.target.outputs.app }}"
+          else
+            ansible-playbook playbooks/deploy.yml
+          fi
+
+      - name: Clean up secrets
+        if: always()
+        run: rm -f .vault_pass.txt ~/.ssh/id_ed25519

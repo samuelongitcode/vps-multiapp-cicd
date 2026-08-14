@@ -1,0 +1,26 @@
+---
+# Copy this file to group_vars/all/vault.yml, fill in real secrets, then:
+#   ansible-vault encrypt group_vars/all/vault.yml
+# Never commit the unencrypted version.
+
+postgres_admin_user: pgadmin
+postgres_admin_password: "CHANGE_ME_super_secret"
+
+minio_root_user: minioadmin
+minio_root_password: "CHANGE_ME_super_secret"
+
+redis_admin_password: "CHANGE_ME_super_secret"
+
+# Contents of the credentials JSON file cloudflared generates when you run
+# `cloudflared tunnel create <name>` (paste the whole file content here,
+# it's normally at ~/.cloudflared/<tunnel_id>.json after creation).
+cloudflare_tunnel_credentials_json: |
+  {"AccountTag":"CHANGE_ME","TunnelSecret":"CHANGE_ME","TunnelID":"CHANGE_ME"}
+
+# Per-app secrets referenced by each app's .env.j2 template
+app_secrets:
+  app1_db_password: "CHANGE_ME"
+  app1_jwt_secret: "CHANGE_ME"
+  app1_redis_password: "CHANGE_ME"
+  app3_minio_access_key: "CHANGE_ME"
+  app3_minio_secret_key: "CHANGE_ME"

@@ -1,0 +1,15 @@
+services:
+  app2-static-site:
+    image: nginx:alpine
+    container_name: app2-static-site
+    restart: unless-stopped
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    networks:
+      - shared_net
+    # No ports published - reached only via Caddy -> Cloudflare Tunnel at
+    # https://app2.example.com (see group_vars/all/vars.yml "domain" field).
+
+networks:
+  shared_net:
+    external: true

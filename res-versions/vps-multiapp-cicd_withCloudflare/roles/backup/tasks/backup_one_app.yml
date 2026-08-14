@@ -1,0 +1,5 @@
+---
+# Used by app_deploy as a pre-deploy safety backup for a single app.
+- name: "Run targeted backup for {{ backup_app.name }}"
+  command: "{{ scripts_root }}/backup.sh {{ backup_app.name }}"
+  changed_when: true

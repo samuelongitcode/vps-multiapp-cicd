@@ -1,0 +1,29 @@
+---
+# Deploy/update apps. Pre-deploy backup runs automatically for any app with
+# a database or bucket, so a bad deploy never costs you data.
+#
+#   ansible-playbook playbooks/deploy.yml                     # deploy every app
+#   ansible-playbook playbooks/deploy.yml -e app=app1-notes-api  # just one app
+- hosts: vps
+  become: true
+  vars_files:
+    - ../group_vars/all/vars.yml
+    - ../group_vars/all/vault.yml
+  tasks:
+    - name: "Build list of apps to deploy"
+      set_fact:
+        apps_to_deploy: "{{ apps if (app is not defined or app == '') else (apps | selectattr('name', 'equalto', app) | list) }}"
+
+    - name: "Fail early if a specific app was requested but not found in registry"
+      fail:
+        msg: "App '{{ app }}' not found in group_vars/all/vars.yml apps list"
+      when: (app is defined and app != '') and (apps_to_deploy | length == 0)
+
+    - name: "Deploy each app"
+      include_role:
+        name: app_deploy
+      vars:
+        app_item: "{{ item }}"
+      loop: "{{ apps_to_deploy }}"
+      loop_control:
+        label: "{{ item.name }}"

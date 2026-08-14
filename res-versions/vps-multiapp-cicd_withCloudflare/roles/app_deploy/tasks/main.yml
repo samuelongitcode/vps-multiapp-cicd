@@ -1,0 +1,60 @@
+---
+# Deploys ONE app. Called in a loop from playbooks/deploy.yml with `app_item` set.
+# Safety order: backup first -> sync code -> render env -> up -d.
+# This means a failed deploy never leaves you without a recent backup.
+
+- name: "Ensure app directory exists: {{ app_item.name }}"
+  file:
+    path: "{{ apps_root }}/{{ app_item.name }}"
+    state: directory
+    mode: "0750"
+
+- name: "Pre-deploy backup for {{ app_item.name }} (skipped if app has no db/bucket)"
+  include_role:
+    name: backup
+    tasks_from: backup_one_app.yml
+  vars:
+    backup_app: "{{ app_item }}"
+  when: (app_item.db_name | default('')) != '' or (app_item.minio_bucket | default('')) != ''
+
+- name: "Sync app folder to server: {{ app_item.name }}"
+  ansible.posix.synchronize:
+    src: "../apps/{{ app_item.name }}/"
+    dest: "{{ apps_root }}/{{ app_item.name }}/"
+    delete: true
+    rsync_opts:
+      - "--exclude=.env"          # never overwrite a live secret file via rsync delete
+      - "--exclude=node_modules"
+  delegate_to: "{{ inventory_hostname }}"
+
+- name: "Check if this app has an .env template"
+  stat:
+    path: "{{ apps_root }}/{{ app_item.name }}/.env.j2"
+  register: env_template
+
+- name: "Render .env for {{ app_item.name }} from vault secrets"
+  template:
+    src: "{{ apps_root }}/{{ app_item.name }}/.env.j2"
+    dest: "{{ apps_root }}/{{ app_item.name }}/.env"
+    mode: "0600"
+  vars:
+    app: "{{ app_item }}"
+  no_log: true
+  when: env_template.stat.exists
+
+- name: "Pull/build images for {{ app_item.name }}"
+  community.docker.docker_compose_v2:
+    project_src: "{{ apps_root }}/{{ app_item.name }}"
+    build: always
+    pull: policy
+    state: present
+
+- name: "Bring up {{ app_item.name }} with zero-downtime recreate"
+  community.docker.docker_compose_v2:
+    project_src: "{{ apps_root }}/{{ app_item.name }}"
+    state: present
+    recreate: always
+
+- name: "Prune dangling images (keep disk usage sane)"
+  command: docker image prune -f
+  changed_when: false

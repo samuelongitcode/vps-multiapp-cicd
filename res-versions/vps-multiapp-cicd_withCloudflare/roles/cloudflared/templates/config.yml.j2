@@ -1,0 +1,21 @@
+# Managed by Ansible - do not edit by hand on the server.
+# Every hostname below is routed here from Cloudflare's edge over an
+# OUTBOUND-only connection this daemon opened - nothing needs to be listening
+# on a public port for any of this to work.
+tunnel: {{ cloudflare_tunnel_id }}
+credentials-file: /etc/cloudflared/{{ cloudflare_tunnel_id }}.json
+
+ingress:
+{% for app in apps %}
+{% if app.domain %}
+  - hostname: {{ app.domain }}
+    service: http://localhost:8080          # -> Caddy, host-routed from there
+{% endif %}
+{% endfor %}
+  - hostname: {{ minio_s3_domain }}
+    service: http://localhost:8080
+  - hostname: {{ minio_console_domain }}
+    service: http://localhost:8080
+  - hostname: {{ ssh_domain }}
+    service: ssh://localhost:22              # SSH tunneled too - no port 22 open
+  - service: http_status:404                 # catch-all, required by cloudflared

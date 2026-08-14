@@ -1,0 +1,27 @@
+---
+# Run ONCE (and safely re-run any time) to set up a fresh VPS:
+# docker, Cloudflare Tunnel (verified working), shared postgres+minio+redis+caddy,
+# per-app databases/buckets/ACL users, backup scripts + cron, then - only once
+# the tunnel is confirmed - lock the firewall down to zero inbound ports.
+#
+# IMPORTANT - read this before the first run:
+#   The very first time you run this against a brand new VPS, do it while
+#   connected via the VPS's direct IP (or your provider's web console), NOT
+#   through the tunnel - the tunnel doesn't exist yet. The `cloudflared` role
+#   verifies the tunnel is actually up before `firewall` ever runs, so a
+#   failed tunnel setup won't lock you out. Once this completes successfully,
+#   switch inventory/hosts.ini to the tunnel-based connection (see README)
+#   and never use the direct IP again.
+#
+#   ansible-playbook playbooks/provision.yml
+- hosts: vps
+  become: true
+  vars_files:
+    - ../group_vars/all/vars.yml
+    - ../group_vars/all/vault.yml
+  roles:
+    - docker
+    - cloudflared
+    - shared_services
+    - backup
+    - firewall   # deliberately last

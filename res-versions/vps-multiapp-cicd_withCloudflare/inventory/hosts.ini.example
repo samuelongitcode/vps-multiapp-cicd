@@ -1,0 +1,12 @@
+# Copy this to inventory/hosts.ini and edit. Two phases - read README.md
+# section 2 before running anything.
+
+# --- PHASE 1: first provision run only, direct IP, before the tunnel exists ---
+# [vps]
+# prod ansible_host=203.0.113.10 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/id_ed25519
+
+# --- PHASE 2: every run after provision.yml has succeeded once ---
+# No IP, no open port 22 - all traffic goes through the Cloudflare Tunnel and
+# is gated by Cloudflare Access. Requires `cloudflared` installed locally too.
+[vps]
+prod ansible_host=ssh.example.com ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/id_ed25519 ansible_ssh_common_args='-o ProxyCommand="cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=accept-new'

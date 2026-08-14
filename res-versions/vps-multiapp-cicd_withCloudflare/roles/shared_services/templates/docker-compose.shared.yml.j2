@@ -1,0 +1,84 @@
+# Managed by Ansible - do not edit by hand on the server.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: shared_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "{{ postgres_admin_user }}"
+      POSTGRES_PASSWORD: "{{ postgres_admin_password }}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - {{ docker_network }}
+    # Not published to the host on purpose: only reachable by other
+    # containers on the shared network. Use an SSH tunnel for admin access.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ postgres_admin_user }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: shared_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "{{ minio_root_user }}"
+      MINIO_ROOT_PASSWORD: "{{ minio_root_password }}"
+    volumes:
+      - minio_data:/data
+    networks:
+      - {{ docker_network }}
+    # No ports published at all - S3 API and console are only reachable
+    # through Caddy (below), which is itself only reachable from this host
+    # via loopback, which is itself only reachable from the internet via the
+    # Cloudflare Tunnel. No direct network path to MinIO exists.
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: shared_caddy
+    restart: unless-stopped
+    volumes:
+      - {{ shared_root }}/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks:
+      - {{ docker_network }}
+    ports:
+      # Bound to loopback ONLY - never reachable from outside this VPS.
+      # cloudflared (running on the host) forwards public hostnames here.
+      - "127.0.0.1:8080:8080"
+
+  redis:
+    image: redis:7-alpine
+    container_name: shared_redis
+    restart: unless-stopped
+    # requirepass secures the default admin user; per-app ACL users (created
+    # by the shared_services role) are what apps actually connect with, each
+    # restricted to its own "appname:*" key prefix.
+    command: redis-server --requirepass "{{ redis_admin_password }}" --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - {{ docker_network }}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "{{ redis_admin_password }}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  {{ docker_network }}:
+    external: true
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:
+  caddy_data:

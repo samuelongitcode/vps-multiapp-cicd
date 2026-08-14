@@ -1,0 +1,14 @@
+services:
+  app1-notes-api:
+    build: .
+    container_name: app1-notes-api
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - shared_net
+    # No ports published - reached only via Caddy -> Cloudflare Tunnel at
+    # https://app1.example.com (see group_vars/all/vars.yml "domain" field).
+
+networks:
+  shared_net:
+    external: true

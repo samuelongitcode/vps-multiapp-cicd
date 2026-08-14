@@ -1,0 +1,53 @@
+---
+# ---- Global paths on the VPS ----
+apps_root: /opt/apps
+shared_root: /opt/shared
+backup_root: /opt/backups
+scripts_root: /opt/scripts
+
+docker_network: shared_net
+
+# ---- Backup retention ----
+backup_keep_days: 14
+
+# ---- App registry ----
+# Single source of truth for what's deployed.
+# Add/remove apps here, then run the deploy playbook.
+# db_name / minio_bucket left blank ("") means "this app doesn't use that service".
+# internal_port = the port the app's own container listens on (NOT published
+# to the host - Caddy reaches it over the shared docker network by name).
+apps:
+  - name: app1-notes-api
+    db_name: app1_db
+    db_user: app1_user
+    minio_bucket: ""
+    redis_enabled: true       # gets its own ACL user, restricted to keys "app1:*"
+    internal_port: 3000
+    domain: "app1.example.com"
+  - name: app2-static-site
+    db_name: ""
+    db_user: ""
+    minio_bucket: ""
+    redis_enabled: false
+    internal_port: 80
+    domain: "app2.example.com"
+  - name: app3-file-vault
+    db_name: ""
+    db_user: ""
+    minio_bucket: "app3-uploads"
+    redis_enabled: false
+    internal_port: 5000
+    domain: "app3.example.com"
+
+# ---- Public hostnames, all served through the Cloudflare Tunnel + Caddy ----
+# Nothing here is ever published on a public port - see roles/cloudflared and
+# roles/shared_services (Caddy). DNS for every hostname below is a CNAME to
+# <tunnel_id>.cfargotunnel.com, created once via `cloudflared tunnel route dns`.
+minio_s3_domain: "s3.example.com"          # S3 API - path-style access, e.g. https://s3.example.com/app3-uploads/key
+minio_console_domain: "minio-console.example.com"
+ssh_domain: "ssh.example.com"              # SSH is tunneled too - no port 22 open anywhere
+
+# ---- Cloudflare Tunnel ----
+# Tunnel ID from `cloudflared tunnel create <name>`. Credentials JSON content
+# and this ID's pairing lives in vault.yml (cloudflare_tunnel_credentials_json).
+cloudflare_tunnel_id: "REPLACE_WITH_YOUR_TUNNEL_ID"

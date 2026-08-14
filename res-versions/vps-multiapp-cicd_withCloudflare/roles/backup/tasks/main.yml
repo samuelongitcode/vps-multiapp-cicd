@@ -1,0 +1,33 @@
+---
+- name: Ensure backup + scripts directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0750"
+  loop:
+    - "{{ backup_root }}"
+    - "{{ backup_root }}/postgres"
+    - "{{ backup_root }}/minio"
+    - "{{ scripts_root }}"
+
+- name: Render backup.sh
+  template:
+    src: backup.sh.j2
+    dest: "{{ scripts_root }}/backup.sh"
+    mode: "0750"
+  no_log: true
+
+- name: Render restore.sh
+  template:
+    src: restore.sh.j2
+    dest: "{{ scripts_root }}/restore.sh"
+    mode: "0750"
+  no_log: true
+
+- name: Schedule nightly backup via cron
+  cron:
+    name: "nightly app backup"
+    minute: "30"
+    hour: "2"
+    job: "{{ scripts_root }}/backup.sh all >> /var/log/app-backup.log 2>&1"
+    user: root
