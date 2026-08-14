@@ -1,0 +1,20 @@
+---
+# Restore a database or a minio bucket from a backup file already on the VPS
+# (under /opt/backups/postgres or /opt/backups/minio).
+#
+#   ansible-playbook playbooks/restore.yml -e kind=db -e name=app1_db -e file=/opt/backups/postgres/app1_db-20260101-020000.sql.gz
+#   ansible-playbook playbooks/restore.yml -e kind=bucket -e name=app3-uploads -e file=/opt/backups/minio/app3-uploads-20260101-020000.tar.gz
+- hosts: vps
+  become: true
+  vars_files:
+    - ../group_vars/all/vars.yml
+    - ../group_vars/all/vault.yml
+  tasks:
+    - name: Fail if required vars are missing
+      fail:
+        msg: "Pass -e kind=db|bucket -e name=<name> -e file=<path>"
+      when: kind is not defined or name is not defined or file is not defined
+
+    - name: Run restore script
+      command: "{{ scripts_root }}/restore.sh {{ kind }} {{ name }} {{ file }}"
+      changed_when: true

@@ -1,0 +1,15 @@
+services:
+  app2-static-site:
+    image: nginx:alpine
+    container_name: app2-static-site
+    restart: unless-stopped
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    networks:
+      - shared_net
+    ports:
+      - "3002:80"   # host port 3002 -> put behind your reverse proxy / domain
+
+networks:
+  shared_net:
+    external: true

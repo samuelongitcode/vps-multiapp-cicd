@@ -1,0 +1,15 @@
+---
+# Run ONCE (and safely re-run any time) to set up a fresh VPS:
+# docker, shared network, shared postgres+minio, per-app databases/buckets,
+# backup scripts + cron.
+#
+#   ansible-playbook playbooks/provision.yml
+- hosts: vps
+  become: true
+  vars_files:
+    - ../group_vars/all/vars.yml
+    - ../group_vars/all/vault.yml
+  roles:
+    - docker
+    - shared_services
+    - backup

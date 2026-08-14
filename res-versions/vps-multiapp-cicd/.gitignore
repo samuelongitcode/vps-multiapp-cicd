@@ -1,0 +1,4 @@
+.vault_pass.txt
+inventory/hosts.ini
+*.retry
+backups/

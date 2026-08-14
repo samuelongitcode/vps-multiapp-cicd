@@ -1,0 +1,14 @@
+services:
+  app3-file-vault:
+    build: .
+    container_name: app3-file-vault
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - shared_net
+    ports:
+      - "3003:5000"   # host port 3003 -> put behind your reverse proxy / domain
+
+networks:
+  shared_net:
+    external: true
