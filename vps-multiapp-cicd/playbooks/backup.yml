@@ -1,0 +1,14 @@
+---
+# Manual/on-demand backup, e.g. right before a risky manual change.
+#
+#   ansible-playbook playbooks/backup.yml                      # backup everything
+#   ansible-playbook playbooks/backup.yml -e app=app1-notes-api  # one app
+- hosts: vps
+  become: true
+  vars_files:
+    - ../group_vars/all/vars.yml
+    - ../group_vars/all/vault.yml
+  tasks:
+    - name: Run backup script
+      command: "{{ scripts_root }}/backup.sh {{ app | default('all') }}"
+      changed_when: true

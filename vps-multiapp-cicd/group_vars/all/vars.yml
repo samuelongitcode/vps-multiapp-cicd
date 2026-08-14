@@ -1,0 +1,35 @@
+---
+# ---- Global paths on the VPS ----
+apps_root: /opt/apps
+shared_root: /opt/shared
+backup_root: /opt/backups
+scripts_root: /opt/scripts
+
+docker_network: shared_net
+
+# ---- Backup retention ----
+backup_keep_days: 14
+
+# ---- App registry ----
+# Single source of truth for what's deployed.
+# Add/remove apps here, then run the deploy playbook.
+# db_name / minio_bucket left blank ("") means "this app doesn't use that service".
+apps:
+  - name: app1-notes-api
+    db_name: app1_db
+    db_user: app1_user
+    minio_bucket: ""
+    redis_enabled: true       # gets its own ACL user, restricted to keys "app1:*"
+    domain: "app1.example.com"
+  - name: app2-static-site
+    db_name: ""
+    db_user: ""
+    minio_bucket: ""
+    redis_enabled: false
+    domain: "app2.example.com"
+  - name: app3-file-vault
+    db_name: ""
+    db_user: ""
+    minio_bucket: "app3-uploads"
+    redis_enabled: false
+    domain: "app3.example.com"

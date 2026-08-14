@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Managed by Ansible. Manual run: sudo /opt/scripts/backup.sh [app-name]
+# With no argument, backs up every app in the registry.
+set -euo pipefail
+
+BACKUP_ROOT="{{ backup_root }}"
+KEEP_DAYS={{ backup_keep_days }}
+TS=$(date +%Y%m%d-%H%M%S)
+TARGET="${1:-all}"
+
+mkdir -p "$BACKUP_ROOT/postgres" "$BACKUP_ROOT/minio" "$BACKUP_ROOT/redis"
+
+backup_db () {
+  local db="$1"
+  echo "[backup] postgres db=$db"
+  docker exec shared_postgres pg_dump -U {{ postgres_admin_user }} "$db" \
+    | gzip > "$BACKUP_ROOT/postgres/${db}-${TS}.sql.gz"
+}
+
+backup_redis () {
+  # Redis is a single shared instance/keyspace (apps are isolated by ACL +
+  # key prefix, not by separate instances), so there is one snapshot for the
+  # whole instance rather than one per app - restoring it restores every
+  # app's cached keys at once.
+  echo "[backup] redis (full instance snapshot)"
+  docker exec shared_redis redis-cli -a {{ redis_admin_password }} --no-auth-warning BGSAVE >/dev/null
+  # BGSAVE is async - wait for it to finish before copying the file.
+  while [ "$(docker exec shared_redis redis-cli -a {{ redis_admin_password }} --no-auth-warning INFO persistence | grep -c 'rdb_bgsave_in_progress:1')" != "0" ]; do
+    sleep 1
+  done
+  docker cp shared_redis:/data/dump.rdb "$BACKUP_ROOT/redis/dump-${TS}.rdb"
+  gzip "$BACKUP_ROOT/redis/dump-${TS}.rdb"
+}
+
+backup_bucket () {
+  local bucket="$1"
+  echo "[backup] minio bucket=$bucket"
+  local dest="$BACKUP_ROOT/minio/${bucket}-${TS}"
+  mkdir -p "$dest"
+  docker run --rm --network {{ docker_network }} \
+    -v "$dest:/backup" minio/mc:latest \
+    sh -c "mc alias set local http://minio:9000 {{ minio_root_user }} {{ minio_root_password }} >/dev/null && mc mirror --quiet local/$bucket /backup"
+  tar -C "$BACKUP_ROOT/minio" -czf "$dest.tar.gz" "$(basename "$dest")"
+  rm -rf "$dest"
+}
+
+{% for app in apps %}
+{% if app.db_name %}
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "{{ app.name }}" ]; then
+  backup_db "{{ app.db_name }}"
+fi
+{% endif %}
+{% if app.minio_bucket %}
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "{{ app.name }}" ]; then
+  backup_bucket "{{ app.minio_bucket }}"
+fi
+{% endif %}
+{% if app.redis_enabled | default(false) %}
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "{{ app.name }}" ]; then
+  backup_redis
+fi
+{% endif %}
+{% endfor %}
+
+echo "[backup] pruning backups older than ${KEEP_DAYS} days"
+find "$BACKUP_ROOT" -type f -mtime +"$KEEP_DAYS" -name "*.gz" -delete
+
+echo "[backup] done: $TS"

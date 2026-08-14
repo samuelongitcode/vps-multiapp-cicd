@@ -1,0 +1,14 @@
+services:
+  app1-notes-api:
+    build: .
+    container_name: app1-notes-api
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - shared_net
+    ports:
+      - "3001:3000"   # host port 3001 -> put behind your reverse proxy / domain
+
+networks:
+  shared_net:
+    external: true

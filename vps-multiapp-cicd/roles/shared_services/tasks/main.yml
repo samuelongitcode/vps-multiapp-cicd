@@ -1,0 +1,143 @@
+---
+- name: Create shared services directory
+  file:
+    path: "{{ shared_root }}"
+    state: directory
+    mode: "0750"
+
+- name: Render shared docker-compose.yml (postgres + minio)
+  template:
+    src: docker-compose.shared.yml.j2
+    dest: "{{ shared_root }}/docker-compose.yml"
+    mode: "0640"
+  no_log: true   # contains rendered passwords
+
+- name: Start shared services (postgres + minio)
+  community.docker.docker_compose_v2:
+    project_src: "{{ shared_root }}"
+    state: present
+    pull: policy
+
+- name: Wait for postgres to be ready
+  command: >
+    docker exec shared_postgres pg_isready -U {{ postgres_admin_user }}
+  register: pg_ready
+  until: pg_ready.rc == 0
+  retries: 10
+  delay: 3
+  changed_when: false
+
+- name: Create per-app databases and users (only for apps that declare db_name)
+  no_log: true
+  loop: "{{ apps }}"
+  loop_control:
+    loop_var: app
+  when: app.db_name | default("") != ""
+  block:
+    - name: "Ensure database exists: {{ app.db_name if app.db_name is defined else '' }}"
+      command: >
+        docker exec shared_postgres psql -U {{ postgres_admin_user }} -tc
+        "SELECT 1 FROM pg_database WHERE datname = '{{ app.db_name }}'"
+      register: db_check
+      changed_when: false
+
+    - name: "Create database {{ app.db_name if app.db_name is defined else '' }}"
+      command: >
+        docker exec shared_postgres createdb -U {{ postgres_admin_user }} {{ app.db_name }}
+      when: "'1' not in db_check.stdout"
+
+    - name: "Ensure app db user exists with password from vault (app_secrets.{{ app.db_user }}_password style key)"
+      command: >
+        docker exec shared_postgres psql -U {{ postgres_admin_user }} -c
+        "DO $$ BEGIN
+           IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{{ app.db_user }}') THEN
+             CREATE ROLE {{ app.db_user }} LOGIN PASSWORD '{{ app_secrets[app.name.split('-')[0] + '_db_password'] | default(app_secrets.app1_db_password) }}';
+           END IF;
+         END $$;"
+      changed_when: false
+
+    - name: "Grant privileges on {{ app.db_name }} to {{ app.db_user }}"
+      command: >
+        docker exec shared_postgres psql -U {{ postgres_admin_user }} -c
+        "GRANT ALL PRIVILEGES ON DATABASE {{ app.db_name }} TO {{ app.db_user }};"
+      changed_when: false
+
+- name: Wait for minio to be ready
+  uri:
+    url: "http://127.0.0.1:9000/minio/health/live"
+    status_code: 200
+  register: minio_ready
+  until: minio_ready.status == 200
+  retries: 10
+  delay: 3
+
+- name: Create per-app minio buckets + scoped access user (only for apps that declare minio_bucket)
+  no_log: true
+  loop: "{{ apps }}"
+  loop_control:
+    loop_var: app
+  when: app.minio_bucket | default("") != ""
+  vars:
+    app_key: "{{ app.name.split('-')[0] }}"          # e.g. "app3" from "app3-file-vault"
+    access_key: "{{ app_secrets[app_key + '_minio_access_key'] }}"
+    secret_key: "{{ app_secrets[app_key + '_minio_secret_key'] }}"
+  block:
+    - name: "Write scoped IAM policy for {{ app.minio_bucket }} to a temp file"
+      copy:
+        dest: "/tmp/{{ app.minio_bucket }}-policy.json"
+        mode: "0600"
+        content: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": ["s3:*"],
+                "Resource": [
+                  "arn:aws:s3:::{{ app.minio_bucket }}",
+                  "arn:aws:s3:::{{ app.minio_bucket }}/*"
+                ]
+              }
+            ]
+          }
+
+    - name: "Create bucket, scoped user, and attach policy for {{ app.minio_bucket }}"
+      command: >
+        docker run --rm --network {{ docker_network }}
+        -v /tmp/{{ app.minio_bucket }}-policy.json:/policy.json:ro
+        minio/mc:latest
+        sh -c "mc alias set local http://minio:9000 {{ minio_root_user }} {{ minio_root_password }} &&
+               mc mb --ignore-existing local/{{ app.minio_bucket }} &&
+               (mc admin user add local {{ access_key }} {{ secret_key }} || true) &&
+               mc admin policy create local {{ app.minio_bucket }}-rw /policy.json &&
+               mc admin policy attach local {{ app.minio_bucket }}-rw --user {{ access_key }}"
+      changed_when: true
+
+    - name: "Remove temp policy file"
+      file:
+        path: "/tmp/{{ app.minio_bucket }}-policy.json"
+        state: absent
+
+- name: Wait for redis to be ready
+  command: >
+    docker exec shared_redis redis-cli -a {{ redis_admin_password }} --no-auth-warning ping
+  register: redis_ready
+  until: redis_ready.stdout == "PONG"
+  retries: 10
+  delay: 3
+  changed_when: false
+
+- name: Create per-app redis ACL users, each restricted to its own "name:*" key prefix (only for apps that declare redis_enabled)
+  no_log: true
+  loop: "{{ apps }}"
+  loop_control:
+    loop_var: app
+  when: app.redis_enabled | default(false)
+  vars:
+    app_key: "{{ app.name.split('-')[0] }}"   # e.g. "app1" from "app1-notes-api"
+    redis_password: "{{ app_secrets[app_key + '_redis_password'] }}"
+  command: >
+    docker exec shared_redis redis-cli -a {{ redis_admin_password }} --no-auth-warning
+    ACL SETUSER {{ app_key }}_redis_user on ">{{ redis_password }}"
+    "~{{ app_key }}:*" "+@all" "-@admin" "-@dangerous"
+  changed_when: true
